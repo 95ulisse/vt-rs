@@ -159,15 +159,6 @@ bitflags! {
     }
 }
 
-/// Virtual terminal management mode.
-#[repr(i32)]
-pub enum VtMode {
-    /// The kernel takes care of rendering the text on the screen.
-    Text = ffi::KD_TEXT,
-    /// The rendering of the terminal is completely given to the user.
-    Graphics = ffi::KD_GRAPHICS
-}
-
 /// An allocated virtual terminal.
 pub struct Vt<'a> {
     console: &'a Console,
@@ -328,15 +319,6 @@ impl<'a> Vt<'a> {
         }
         self.update_termios()?;
 
-        Ok(self)
-    }
-
-    /// Changs the rendering mode of the terminal.
-    /// 
-    /// Returns `self` for chaining.
-    pub fn mode(&mut self, mode: VtMode) -> io::Result<&mut Self> {
-        self.ensure_open()?;
-        ffi::kd_setmode(self.file.as_ref().unwrap().as_raw_fd(), mode as c_int)?;
         Ok(self)
     }
 

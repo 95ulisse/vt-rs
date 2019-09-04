@@ -3,9 +3,6 @@ use std::os::unix::io::RawFd;
 use nix::libc::*;
 
 // Some constants missing from `libc`
-pub const KD_SETMODE: c_int          = 0x4B3A;
-pub const KD_TEXT: c_int             = 0x0000;
-pub const KD_GRAPHICS: c_int         = 0x0001;
 pub const VT_OPENQRY: c_int          = 0x5600;
 pub const VT_GETSTATE: c_int         = 0x5603;
 pub const VT_ACTIVATE: c_int         = 0x5606;
@@ -66,7 +63,6 @@ macro_rules! ioctl_set_wrapper {
 }
 
 // Ioctl function wrappers
-ioctl_set_wrapper!(kd_setmode, KD_SETMODE, c_int);
 ioctl_get_wrapper!(vt_openqry, VT_OPENQRY, c_int);
 ioctl_get_wrapper!(vt_getstate, VT_GETSTATE, VtStat);
 ioctl_set_wrapper!(vt_activate, VT_ACTIVATE, c_int);
