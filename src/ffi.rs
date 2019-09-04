@@ -3,13 +3,18 @@ use std::os::unix::io::RawFd;
 use nix::libc::*;
 
 // Some constants missing from `libc`
-const VT_OPENQRY: c_int = 0x5600;
-const VT_GETSTATE: c_int = 0x5603;
-const VT_ACTIVATE: c_int = 0x5606;
-const VT_WAITACTIVE: c_int = 0x5607;
-const VT_DISALLOCATE: c_int = 0x5608;
-const VT_LOCKSWITCH: c_int = 0x560B;
-const VT_UNLOCKSWITCH: c_int = 0x560C;
+pub const KD_SETMODE: c_int          = 0x4B3A;
+pub const KD_TEXT: c_int             = 0x0000;
+pub const KD_GRAPHICS: c_int         = 0x0001;
+pub const VT_OPENQRY: c_int          = 0x5600;
+pub const VT_GETSTATE: c_int         = 0x5603;
+pub const VT_ACTIVATE: c_int         = 0x5606;
+pub const VT_WAITACTIVE: c_int       = 0x5607;
+pub const VT_DISALLOCATE: c_int      = 0x5608;
+pub const VT_LOCKSWITCH: c_int       = 0x560B;
+pub const VT_UNLOCKSWITCH: c_int     = 0x560C;
+pub const TIOCL_BLANKSCREEN: c_int   = 14;
+pub const TIOCL_UNBLANKSCREEN: c_int = 4;
 
 // Structures for the vt ioctls
 #[repr(C)]
@@ -61,6 +66,7 @@ macro_rules! ioctl_set_wrapper {
 }
 
 // Ioctl function wrappers
+ioctl_set_wrapper!(kd_setmode, KD_SETMODE, c_int);
 ioctl_get_wrapper!(vt_openqry, VT_OPENQRY, c_int);
 ioctl_get_wrapper!(vt_getstate, VT_GETSTATE, VtStat);
 ioctl_set_wrapper!(vt_activate, VT_ACTIVATE, c_int);
@@ -68,3 +74,4 @@ ioctl_set_wrapper!(vt_waitactive, VT_WAITACTIVE, c_int);
 ioctl_set_wrapper!(vt_disallocate, VT_DISALLOCATE, c_int);
 ioctl_set_wrapper!(vt_lockswitch, VT_LOCKSWITCH, c_int);
 ioctl_set_wrapper!(vt_unlockswitch, VT_UNLOCKSWITCH, c_int);
+ioctl_set_wrapper!(tioclinux, TIOCLINUX, *mut c_int);
