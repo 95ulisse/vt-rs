@@ -1,3 +1,27 @@
+//! # vt-rs
+//! 
+//! Rust bindings for the Linux virtual terminal APIs.
+//! 
+//! ```rust,no_run
+//! # use std::io::Write;
+//! use vt::Console;
+//! 
+//! // First of all, get a handle to the console
+//! let console = Console::open().unwrap();
+//! 
+//! // Allocate a new virtual terminal
+//! let mut vt = console.new_vt().unwrap();
+//! 
+//! // Write something to it.
+//! // A `Vt` structure implements both `std::io::Read` and `std::io::Write`.
+//! writeln!(vt, "Hello world!");
+//! 
+//! // Switch to the newly allocated terminal
+//! vt.switch().unwrap();
+//! ```
+//! 
+//! For a more complete example, see the files in the `examples` folder.
+
 #[macro_use] extern crate bitflags;
 
 use std::io::{self, Write, Read};
@@ -37,8 +61,8 @@ impl Console {
     /// Allocates a new virtual terminal.
     /// To switch to the newly created terminal, use [`Vt::switch`] or [`Console::switch_to`].
     /// 
-    /// [`Console::switch_to`](crate::Console::switch_to)
-    /// [`Vt::switch`](crate::Vt::switch)
+    /// [`Console::switch_to`]: crate::Console::switch_to
+    /// [`Vt::switch`]: crate::Vt::switch
     pub fn new_vt(&self) -> io::Result<Vt> {
         self.new_vt_with_minimum_number(0)
     }
@@ -49,8 +73,8 @@ impl Console {
     /// 
     /// To switch to the newly created terminal, use [`Vt::switch`] or [`Console::switch_to`].
     /// 
-    /// [`Console::switch_to`](crate::Console::switch_to)
-    /// [`Vt::switch`](crate::Vt::switch)
+    /// [`Console::switch_to`]: crate::Console::switch_to
+    /// [`Vt::switch`]: crate::Vt::switch
     pub fn new_vt_with_minimum_number(&self, min: u16) -> io::Result<Vt> {
         
         // Get the first available vt number
@@ -136,7 +160,7 @@ impl Console {
     /// Returns the current console blank timer value. A value of `0` means that the timer is disabled.
     /// To change the blank timer, use the [`Vt::set_blank_timer`] method.
     /// 
-    /// [`Vt::set_blank_timer`](crate::Vt::set_blank_timer)
+    /// [`Vt::set_blank_timer`]: crate::Vt::set_blank_timer
     pub fn blank_timer(&self) -> io::Result<u32> {
         OpenOptions::new().read(true).open("/sys/module/kernel/parameters/consoleblank")
             .and_then(|mut f| {
@@ -151,7 +175,7 @@ bitflags! {
     /// Enum containing all the signals supported by the virtual terminal.
     /// Use [`Vt::signals`] to manage the signals enabled in a virtual terminal.
     /// 
-    /// [`Vt::signals`](crate::Vt::signals)
+    /// [`Vt::signals`]: crate::Vt::signals
     pub struct VtSignals: u8 {
         const SIGINT  = 1;
         const SIGQUIT = 1 << 1;
@@ -228,7 +252,7 @@ impl<'a> Vt<'a> {
     /// 
     /// Returns `self` for chaining.
     /// 
-    /// [`Console::switch_to`](crate::Console::switch_to)
+    /// [`Console::switch_to`]: crate::Console::switch_to
     pub fn switch(&self) -> io::Result<&Self> {
         self.console.switch_to(self.number)?;
         Ok(self)
@@ -339,7 +363,7 @@ impl<'a> Drop for Vt<'a> {
 
 /// Reading from a [`Vt`] reads directly from the underlying terminal.
 /// 
-/// [`Vt`](crate::Vt)
+/// [`Vt`]: crate::Vt
 impl<'a> Read for Vt<'a> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.ensure_open()?;
@@ -349,7 +373,7 @@ impl<'a> Read for Vt<'a> {
 
 /// Writing to a [`Vt`] writes directly to the underlying terminal.
 /// 
-/// [`Vt`](crate::Vt)
+/// [`Vt`]: crate::Vt
 impl<'a> Write for Vt<'a> {
 
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
