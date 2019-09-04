@@ -31,7 +31,7 @@ impl Console {
     /// Returns the currently active virtual terminal.
     pub fn current_vt(&self) -> io::Result<Vt>{
         let vtstate = ffi::vt_getstate(self.file.as_raw_fd())?;
-        Ok(Vt::with_number(self, vtstate.v_active))
+        Ok(Vt::with_number(self, vtstate.v_active, false))
     }
 
     /// Allocates a new virtual terminal.
@@ -58,7 +58,7 @@ impl Console {
         let mut vt: Vt;
 
         if n >= min {
-            vt = Vt::with_number(self, n);
+            vt = Vt::with_number(self, n, true);
         } else {
             n = min;
 
@@ -77,7 +77,7 @@ impl Console {
             }
 
             if found {
-                vt = Vt::with_number(self, n);
+                vt = Vt::with_number(self, n, true);
             } else {
 
                 // Slow path: we might be unlucky, and all the first 16 vts are already occupied.
@@ -99,7 +99,7 @@ impl Console {
                 }
 
                 n = first_free;
-                vt = Vt::with_number_and_file(self, n, files.pop().unwrap())?;
+                vt = Vt::with_number_and_file(self, n, files.pop().unwrap(), true)?;
 
             }
         }
@@ -164,26 +164,29 @@ pub struct Vt<'a> {
     console: &'a Console,
     number: u16,
     file: Option<File>,
-    termios: Option<Termios>
+    termios: Option<Termios>,
+    is_owned: bool
 }
 
 impl<'a> Vt<'a> {
     
-    fn with_number(console: &'a Console, number: u16) -> Vt<'a> {
+    fn with_number(console: &'a Console, number: u16, owned: bool) -> Vt<'a> {
         Vt {
             console,
             number,
             file: None,
-            termios: None
+            termios: None,
+            is_owned: owned
         }
     }
 
-    fn with_number_and_file(console: &'a Console, number: u16, file: File) -> io::Result<Vt<'a>> {
+    fn with_number_and_file(console: &'a Console, number: u16, file: File, owned: bool) -> io::Result<Vt<'a>> {
         let mut vt = Vt {
             console,
             number,
             file: Some(file),
-            termios: None
+            termios: None,
+            is_owned: owned
         };
         vt.ensure_open()?;
         Ok(vt)
@@ -326,9 +329,11 @@ impl<'a> Vt<'a> {
 
 impl<'a> Drop for Vt<'a> {
     fn drop(&mut self) {
-        // Notify the kernel that we do not need the vt anymore.
-        // Note we don't check the return value because we have no way to recover from a closing error.
-        let _ = ffi::vt_disallocate(self.console.file.as_raw_fd(), c_int::from(self.number));
+        if self.is_owned {
+            // Notify the kernel that we do not need the vt anymore.
+            // Note we don't check the return value because we have no way to recover from a closing error.
+            let _ = ffi::vt_disallocate(self.console.file.as_raw_fd(), c_int::from(self.number));
+        }
     }
 }
 
