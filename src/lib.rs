@@ -183,6 +183,13 @@ bitflags! {
     }
 }
 
+/// Enum containing the VT buffers to flush.
+pub enum VtFlushType {
+    Incoming,
+    Outgoing,
+    Both
+}
+
 /// An allocated virtual terminal.
 pub struct Vt<'a> {
     console: &'a Console,
@@ -263,7 +270,6 @@ impl<'a> Vt<'a> {
     /// Returns `self` for chaining.
     pub fn clear(&mut self) -> io::Result<&mut Self> {
         write!(self, "\x1b[H\x1b[J")?;
-        self.flush()?;
         Ok(self)
     }
 
@@ -272,7 +278,6 @@ impl<'a> Vt<'a> {
     /// Returns `self` for chaining.
     pub fn set_blank_timer(&mut self, timer: u32) -> io::Result<&mut Self> {
         write!(self, "\x1b[9;{}]", timer)?;
-        self.flush()?;
         Ok(self)
     }
 
@@ -349,6 +354,21 @@ impl<'a> Vt<'a> {
         Ok(self)
     }
 
+    /// Flushes the internal buffers of the terminal.
+    pub fn flush_buffers(&mut self, t: VtFlushType) -> io::Result<&mut Self> {
+        self.ensure_open()?;
+
+        let action = match t {
+            VtFlushType::Incoming => FlushArg::TCIFLUSH,
+            VtFlushType::Outgoing => FlushArg::TCOFLUSH,
+            VtFlushType::Both => FlushArg::TCIOFLUSH
+        };
+        tcflush(self.file.as_ref().unwrap().as_raw_fd(), action)
+            .map_err(|e| io::Error::from_raw_os_error(e.as_errno().unwrap_or(nix::errno::Errno::UnknownErrno) as i32))?;
+
+        Ok(self)
+    }
+
 }
 
 impl<'a> Drop for Vt<'a> {
@@ -383,9 +403,7 @@ impl<'a> Write for Vt<'a> {
 
     fn flush(&mut self) -> io::Result<()> {
         self.ensure_open()?;
-        self.file.as_ref().unwrap().flush()?;
-        tcflush(self.file.as_ref().unwrap().as_raw_fd(), FlushArg::TCIFLUSH)
-            .map_err(|e| io::Error::from_raw_os_error(e.as_errno().unwrap_or(nix::errno::Errno::UnknownErrno) as i32))
+        self.file.as_ref().unwrap().flush()
     }
 
 }
