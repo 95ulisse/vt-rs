@@ -323,6 +323,12 @@ impl<'a> Vt<'a> {
         Ok(self)
     }
 
+    /// Returns a value indicating whether this terminal has echo enabled or not.
+    pub fn get_echo(&mut self) -> io::Result<bool> {
+        self.ensure_open()?;
+        Ok(self.termios.as_ref().unwrap().local_flags.contains(LocalFlags::ECHO))
+    }
+
     /// Enables or disables signal generation from terminal.
     /// 
     /// Returns `self` for chaining.
