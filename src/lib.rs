@@ -340,17 +340,17 @@ impl<'a> Vt<'a> {
         termios.local_flags |= LocalFlags::ISIG;
 
         // Now we enable/disable the single signals
-        if signals.contains(VtSignals::SIGINT) {
+        if !signals.contains(VtSignals::SIGINT) {
             termios.control_chars[SpecialCharacterIndices::VINTR as usize] = 0;
         } else {
             termios.control_chars[SpecialCharacterIndices::VINTR as usize] = 3;
         }
-        if signals.contains(VtSignals::SIGQUIT) {
+        if !signals.contains(VtSignals::SIGQUIT) {
             termios.control_chars[SpecialCharacterIndices::VQUIT as usize] = 0;
         } else {
             termios.control_chars[SpecialCharacterIndices::VQUIT as usize] = 34;
         }
-        if signals.contains(VtSignals::SIGTSTP) {
+        if !signals.contains(VtSignals::SIGTSTP) {
             termios.control_chars[SpecialCharacterIndices::VSUSP as usize] = 0;
         } else {
             termios.control_chars[SpecialCharacterIndices::VSUSP as usize] = 32;
