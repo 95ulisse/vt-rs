@@ -5,7 +5,7 @@ use std::os::unix::io::{RawFd, AsRawFd};
 use nix::libc::*;
 use nix::sys::termios::{
     Termios, InputFlags, LocalFlags, FlushArg, SetArg, SpecialCharacterIndices,
-    tcgetattr, tcsetattr, tcflush
+    tcgetattr, tcsetattr, tcflush, cfmakeraw
 };
 use crate::ffi;
 use crate::console::Console;
@@ -242,6 +242,14 @@ impl<'a> Vt<'a> {
         tcflush(self.file.as_raw_fd(), action)
             .map_err(|e| io::Error::from_raw_os_error(e.as_errno().unwrap_or(nix::errno::Errno::UnknownErrno) as i32))?;
 
+        Ok(self)
+    }
+
+    /// Configures the terminal in raw mode: input is available character by character,
+    /// echoing is disabled, and all special processing of terminal input and output characters is disabled.
+    pub fn raw(&mut self) -> io::Result<&mut Self> {
+        cfmakeraw(&mut self.termios);
+        self.update_termios()?;
         Ok(self)
     }
 
