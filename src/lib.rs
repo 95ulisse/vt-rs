@@ -25,7 +25,9 @@
 #[macro_use] extern crate bitflags;
 
 use std::io::{self, Write, Read};
+use std::fmt;
 use std::fs::{File, OpenOptions};
+use std::ops::{Deref, DerefMut};
 use std::os::unix::io::AsRawFd;
 use nix::libc::*;
 use nix::sys::termios::{
@@ -53,9 +55,9 @@ impl Console {
     }
 
     /// Returns the currently active virtual terminal.
-    pub fn current_vt(&self) -> io::Result<Vt>{
+    pub fn current_vt_number(&self) -> io::Result<VtNumber>{
         let vtstate = ffi::vt_getstate(self.file.as_raw_fd())?;
-        Ok(Vt::with_number(self, vtstate.v_active, false))
+        Ok(VtNumber::new(vtstate.v_active.into()))
     }
 
     /// Allocates a new virtual terminal.
@@ -75,14 +77,14 @@ impl Console {
     /// 
     /// [`Console::switch_to`]: crate::Console::switch_to
     /// [`Vt::switch`]: crate::Vt::switch
-    pub fn new_vt_with_minimum_number(&self, min: u16) -> io::Result<Vt> {
+    pub fn new_vt_with_minimum_number(&self, min: i32) -> io::Result<Vt> {
         
         // Get the first available vt number
-        let mut n = ffi::vt_openqry(self.file.as_raw_fd())? as u16;
+        let mut n = ffi::vt_openqry(self.file.as_raw_fd())? as i32;
         let mut vt: Vt;
 
         if n >= min {
-            vt = Vt::with_number(self, n, true);
+            vt = Vt::with_number(self, n.into())?;
         } else {
             n = min;
 
@@ -101,7 +103,7 @@ impl Console {
             }
 
             if found {
-                vt = Vt::with_number(self, n, true);
+                vt = Vt::with_number(self, n.into())?;
             } else {
 
                 // Slow path: we might be unlucky, and all the first 16 vts are already occupied.
@@ -118,34 +120,36 @@ impl Console {
                 
                 let mut first_free = 0;
                 while first_free < n {
-                    first_free = ffi::vt_openqry(self.file.as_raw_fd())? as u16;
+                    first_free = ffi::vt_openqry(self.file.as_raw_fd())? as i32;
                     files.push(OpenOptions::new().read(true).write(true).open(format!("/dev/tty{}", first_free))?);
                 }
 
                 n = first_free;
-                vt = Vt::with_number_and_file(self, n, files.pop().unwrap(), true)?;
+                vt = Vt::with_number_and_file(self, n.into(), files.pop().unwrap())?;
 
             }
         }
 
-        // Make sure that the vt is open
-        vt.ensure_open()?;
-
         // By default we turn off echo and signal generation.
         // We also disable Ctrl+D for EOF, since we will almost never want it.
-        let termios = vt.termios.as_mut().unwrap();
-        termios.input_flags |= InputFlags::IGNBRK;
-        termios.local_flags &= !(LocalFlags::ECHO | LocalFlags::ISIG);
-        termios.control_chars[SpecialCharacterIndices::VEOF as usize] = 0;
+        vt.termios.input_flags |= InputFlags::IGNBRK;
+        vt.termios.local_flags &= !(LocalFlags::ECHO | LocalFlags::ISIG);
+        vt.termios.control_chars[SpecialCharacterIndices::VEOF as usize] = 0;
         vt.update_termios()?;
 
         Ok(vt)
     }
 
+    /// Opens the terminal with the given number.
+    pub fn open_vt<N: AsVtNumber>(&self, vt_number: N) -> io::Result<Vt> {
+        Vt::with_number(self, vt_number.as_vt_number())
+    }
+
     /// Switches to the virtual terminal with the given number.
-    pub fn switch_to(&self, vt_number: u16) -> io::Result<()> {
-        ffi::vt_activate(self.file.as_raw_fd(), c_int::from(vt_number))?;
-        ffi::vt_waitactive(self.file.as_raw_fd(), c_int::from(vt_number))
+    pub fn switch_to<N: AsVtNumber>(&self, vt_number: N) -> io::Result<()> {
+        let n = vt_number.as_vt_number().as_native();
+        ffi::vt_activate(self.file.as_raw_fd(), n)?;
+        ffi::vt_waitactive(self.file.as_raw_fd(), n)
     }
 
     /// Enables or disables virtual terminal switching (usually done with `Ctrl + Alt + F<n>`).
@@ -171,6 +175,55 @@ impl Console {
 
 }
 
+/// A trait to extract the raw terminal number from an object.
+pub trait AsVtNumber {
+
+    /// Returns the underlying terminal number of this object.
+    fn as_vt_number(&self) -> VtNumber;
+    
+}
+
+/// Number of a virtual terminal.
+///
+/// Can be opened to get full access to the terminal.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct VtNumber(i32);
+
+impl VtNumber {
+
+    /// Creates a new `VtNumber` for the given integer.
+    /// Panics if the number is negative.
+    pub fn new(number: i32) -> VtNumber {
+        if number < 0 {
+            panic!("Invalid virtual terminal number.");
+        }
+        VtNumber(number)
+    }
+
+    fn as_native(self) -> c_int {
+        self.0
+    }
+
+}
+
+impl From<i32> for VtNumber {
+    fn from(number: i32) -> VtNumber {
+        VtNumber::new(number)
+    }
+}
+
+impl AsVtNumber for VtNumber {
+    fn as_vt_number(&self) -> VtNumber {
+        *self
+    }
+}
+
+impl fmt::Display for VtNumber {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 bitflags! {
     /// Enum containing all the signals supported by the virtual terminal.
     /// Use [`Vt::signals`] to manage the signals enabled in a virtual terminal.
@@ -193,65 +246,47 @@ pub enum VtFlushType {
 /// An allocated virtual terminal.
 pub struct Vt<'a> {
     console: &'a Console,
-    number: u16,
-    file: Option<File>,
-    termios: Option<Termios>,
-    is_owned: bool
+    number: VtNumber,
+    file: File,
+    termios: Termios
 }
 
 impl<'a> Vt<'a> {
     
-    fn with_number(console: &'a Console, number: u16, owned: bool) -> Vt<'a> {
-        Vt {
-            console,
-            number,
-            file: None,
-            termios: None,
-            is_owned: owned
-        }
+    fn with_number(console: &'a Console, number: VtNumber) -> io::Result<Vt<'a>> {
+        
+        // Open the device corresponding to the number of this vt
+        let path = format!("/dev/tty{}", number);
+        let file = OpenOptions::new().read(true).write(true).open(path)?;
+
+        Vt::with_number_and_file(console, number, file)
     }
 
-    fn with_number_and_file(console: &'a Console, number: u16, file: File, owned: bool) -> io::Result<Vt<'a>> {
-        let mut vt = Vt {
+    fn with_number_and_file(console: &'a Console, number: VtNumber, file: File) -> io::Result<Vt<'a>> {
+        
+        // Get the termios info for the current file
+        let termios = tcgetattr(file.as_raw_fd())
+                      .map_err(|e| io::Error::from_raw_os_error(e.as_errno().unwrap_or(nix::errno::Errno::UnknownErrno) as i32))?;
+
+        Ok(Vt {
             console,
             number,
-            file: Some(file),
-            termios: None,
-            is_owned: owned
-        };
-        vt.ensure_open()?;
-        Ok(vt)
-    }
-
-    fn ensure_open(&mut self) -> io::Result<()> {
-
-        if self.file.is_none() {
-            // Open the device corresponding to the number of this vt
-            let path = format!("/dev/tty{}", self.number);
-            self.file = Some(OpenOptions::new().read(true).write(true).open(path)?);
-        }
-
-        if self.termios.is_none() {
-            // Get the termios info for the current vt
-            let termios = tcgetattr(self.file.as_ref().unwrap().as_raw_fd())
-                          .map_err(|e| io::Error::from_raw_os_error(e.as_errno().unwrap_or(nix::errno::Errno::UnknownErrno) as i32))?;
-            self.termios = Some(termios);
-        }
-
-        Ok(())
+            file,
+            termios
+        })
     }
 
     fn update_termios(&self) -> io::Result<()> {
         tcsetattr(
-            self.file.as_ref().unwrap().as_raw_fd(),
+            self.file.as_raw_fd(),
             SetArg::TCSANOW,
-            self.termios.as_ref().unwrap()
+            &self.termios
         )
         .map_err(|e| io::Error::from_raw_os_error(e.as_errno().unwrap_or(nix::errno::Errno::UnknownErrno) as i32))
     }
 
     /// Returns the number of this virtual terminal.
-    pub fn number(&self) -> u16 {
+    pub fn number(&self) -> VtNumber {
         self.number
     }
 
@@ -285,7 +320,6 @@ impl<'a> Vt<'a> {
     /// 
     /// Returns `self` for chaining.
     pub fn blank(&mut self, blank: bool) -> io::Result<&mut Self> {
-        self.ensure_open()?;
         
         // If the console blanking timer is disabled, the ioctl below will fail,
         // so we need to enable it just for the time needed for the ioctl to work.
@@ -297,7 +331,7 @@ impl<'a> Vt<'a> {
         };
 
         let mut arg = if blank { ffi::TIOCL_BLANKSCREEN } else { ffi::TIOCL_UNBLANKSCREEN };
-        ffi::tioclinux(self.file.as_ref().unwrap().as_raw_fd(), &mut arg)?;
+        ffi::tioclinux(self.file.as_raw_fd(), &mut arg)?;
 
         // Disable the blank timer if originally it was disabled
         if needs_timer_reset {
@@ -310,13 +344,11 @@ impl<'a> Vt<'a> {
     /// Enables or disables the echo of the characters typed by the user.
     /// 
     /// Returns `self` for chaining.
-    pub fn echo(&mut self, echo: bool) -> io::Result<&mut Self> {
-        self.ensure_open()?;
-
+    pub fn set_echo(&mut self, echo: bool) -> io::Result<&mut Self> {
         if echo {
-            self.termios.as_mut().unwrap().local_flags |= LocalFlags::ECHO;
+            self.termios.local_flags |= LocalFlags::ECHO;
         } else {
-            self.termios.as_mut().unwrap().local_flags &= !LocalFlags::ECHO;
+            self.termios.local_flags &= !LocalFlags::ECHO;
         }
         self.update_termios()?;
 
@@ -324,36 +356,33 @@ impl<'a> Vt<'a> {
     }
 
     /// Returns a value indicating whether this terminal has echo enabled or not.
-    pub fn get_echo(&mut self) -> io::Result<bool> {
-        self.ensure_open()?;
-        Ok(self.termios.as_ref().unwrap().local_flags.contains(LocalFlags::ECHO))
+    pub fn is_echo_enabled(&self) -> bool {
+        self.termios.local_flags.contains(LocalFlags::ECHO)
     }
 
     /// Enables or disables signal generation from terminal.
     /// 
     /// Returns `self` for chaining.
     pub fn signals(&mut self, signals: VtSignals) -> io::Result<&mut Self> {
-        self.ensure_open()?;
         
         // Since we created the vt with signals disabled, we need to enable them
-        let termios = self.termios.as_mut().unwrap();
-        termios.local_flags |= LocalFlags::ISIG;
+        self.termios.local_flags |= LocalFlags::ISIG;
 
         // Now we enable/disable the single signals
         if !signals.contains(VtSignals::SIGINT) {
-            termios.control_chars[SpecialCharacterIndices::VINTR as usize] = 0;
+            self.termios.control_chars[SpecialCharacterIndices::VINTR as usize] = 0;
         } else {
-            termios.control_chars[SpecialCharacterIndices::VINTR as usize] = 3;
+            self.termios.control_chars[SpecialCharacterIndices::VINTR as usize] = 3;
         }
         if !signals.contains(VtSignals::SIGQUIT) {
-            termios.control_chars[SpecialCharacterIndices::VQUIT as usize] = 0;
+            self.termios.control_chars[SpecialCharacterIndices::VQUIT as usize] = 0;
         } else {
-            termios.control_chars[SpecialCharacterIndices::VQUIT as usize] = 34;
+            self.termios.control_chars[SpecialCharacterIndices::VQUIT as usize] = 34;
         }
         if !signals.contains(VtSignals::SIGTSTP) {
-            termios.control_chars[SpecialCharacterIndices::VSUSP as usize] = 0;
+            self.termios.control_chars[SpecialCharacterIndices::VSUSP as usize] = 0;
         } else {
-            termios.control_chars[SpecialCharacterIndices::VSUSP as usize] = 32;
+            self.termios.control_chars[SpecialCharacterIndices::VSUSP as usize] = 32;
         }
         self.update_termios()?;
 
@@ -362,14 +391,12 @@ impl<'a> Vt<'a> {
 
     /// Flushes the internal buffers of the terminal.
     pub fn flush_buffers(&mut self, t: VtFlushType) -> io::Result<&mut Self> {
-        self.ensure_open()?;
-
         let action = match t {
             VtFlushType::Incoming => FlushArg::TCIFLUSH,
             VtFlushType::Outgoing => FlushArg::TCOFLUSH,
             VtFlushType::Both => FlushArg::TCIOFLUSH
         };
-        tcflush(self.file.as_ref().unwrap().as_raw_fd(), action)
+        tcflush(self.file.as_raw_fd(), action)
             .map_err(|e| io::Error::from_raw_os_error(e.as_errno().unwrap_or(nix::errno::Errno::UnknownErrno) as i32))?;
 
         Ok(self)
@@ -379,37 +406,27 @@ impl<'a> Vt<'a> {
 
 impl<'a> Drop for Vt<'a> {
     fn drop(&mut self) {
-        if self.is_owned {
-            // Notify the kernel that we do not need the vt anymore.
-            // Note we don't check the return value because we have no way to recover from a closing error.
-            let _ = ffi::vt_disallocate(self.console.file.as_raw_fd(), c_int::from(self.number));
-        }
+        // Notify the kernel that we do not need the vt anymore.
+        // Note we don't check the return value because we have no way to recover from a closing error.
+        let _ = ffi::vt_disallocate(self.console.file.as_raw_fd(), self.number.as_native());
     }
 }
 
-/// Reading from a [`Vt`] reads directly from the underlying terminal.
-/// 
-/// [`Vt`]: crate::Vt
-impl<'a> Read for Vt<'a> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.ensure_open()?;
-        self.file.as_ref().unwrap().read(buf)
+impl<'a> AsVtNumber for Vt<'a> {
+    fn as_vt_number(&self) -> VtNumber {
+        self.number
     }
 }
 
-/// Writing to a [`Vt`] writes directly to the underlying terminal.
-/// 
-/// [`Vt`]: crate::Vt
-impl<'a> Write for Vt<'a> {
-
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.ensure_open()?;
-        self.file.as_ref().unwrap().write(buf)
+impl<'a> Deref for Vt<'a> {
+    type Target = File;
+    fn deref(&self) -> &Self::Target {
+        &self.file
     }
+}
 
-    fn flush(&mut self) -> io::Result<()> {
-        self.ensure_open()?;
-        self.file.as_ref().unwrap().flush()
-    }
-
+impl<'a> DerefMut for Vt<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.file
+    }   
 }

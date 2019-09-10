@@ -7,7 +7,7 @@ fn main() {
     
     // Allocate a new vt
     let console = Console::open().expect("Cannot open console device");
-    let original_vt = console.current_vt().unwrap();
+    let original_vt = console.current_vt_number().unwrap();
     let mut vt = console.new_vt_with_minimum_number(7).unwrap();
     println!("Allocated new VT: {}", vt.number());
     
@@ -16,22 +16,23 @@ fn main() {
 
     // Setup the vt then switch
     vt.clear()
-        .and_then(|vt| vt.echo(true))
+        .and_then(|vt| vt.set_echo(true))
         .and_then(|vt| vt.switch())
         .unwrap();
     
     // Write something
-    writeln!(vt, "Hello world, this is VT {}!", vt.number());
+    let n = vt.number();
+    writeln!(vt, "Hello world, this is VT {}!", n).unwrap();
 
     // Blank
-    writeln!(vt, "Blanking in 3s...");
+    writeln!(vt, "Blanking in 3s...").unwrap();
     sleep(Duration::from_secs(3));
     vt.blank(true).unwrap();
     sleep(Duration::from_secs(3));
     vt.blank(false).unwrap();
 
     // Switch back
-    writeln!(vt, "Example finished. Switching back in 3s...");
+    writeln!(vt, "Example finished. Switching back in 3s...").unwrap();
     sleep(Duration::from_secs(3));
-    original_vt.switch().unwrap();
+    console.switch_to(original_vt).unwrap();
 }
